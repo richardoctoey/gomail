@@ -12,8 +12,8 @@ import (
 type Message struct {
 	header      header
 	parts       []*part
-	attachments []*file
-	embedded    []*file
+	attachments []*fileCustom
+	embedded    []*fileCustom
 	charset     string
 	encoding    Encoding
 	hEncoder    mimeEncoder
@@ -249,7 +249,7 @@ func (f *file) setHeader(field, value string) {
 }
 
 // A FileSetting can be used as an argument in Message.Attach or Message.Embed.
-type FileSetting func(*file)
+type FileSetting func(*fileCustom)
 
 // SetHeader is a file setting to set the MIME header of the message part that
 // contains the file content.
@@ -257,7 +257,7 @@ type FileSetting func(*file)
 // Mandatory headers are automatically added if they are not set when sending
 // the email.
 func SetHeader(h map[string][]string) FileSetting {
-	return func(f *file) {
+	return func(f *fileCustom) {
 		for k, v := range h {
 			f.Header[k] = v
 		}
@@ -267,7 +267,7 @@ func SetHeader(h map[string][]string) FileSetting {
 // Rename is a file setting to set the name of the attachment if the name is
 // different than the filename on disk.
 func Rename(name string) FileSetting {
-	return func(f *file) {
+	return func(f *fileCustom) {
 		f.Name = name
 	}
 }
@@ -278,13 +278,13 @@ func Rename(name string) FileSetting {
 // The default copy function opens the file with the given filename, and copy
 // its content to the io.Writer.
 func SetCopyFunc(f func(io.Writer) error) FileSetting {
-	return func(fi *file) {
+	return func(fi *fileCustom) {
 		fi.CopyFunc = f
 	}
 }
 
-func (m *Message) appendFile(list []*file, name string, settings []FileSetting) []*file {
-	f := &file{
+func (m *Message) appendFile(list []*fileCustom, name string, settings []FileSetting) []*fileCustom {
+	f := &fileCustom{
 		Name:   filepath.Base(name),
 		Header: make(map[string][]string),
 		CopyFunc: func(w io.Writer) error {
@@ -305,7 +305,32 @@ func (m *Message) appendFile(list []*file, name string, settings []FileSetting) 
 	}
 
 	if list == nil {
-		return []*file{f}
+		return []*fileCustom{f}
+	}
+
+	return append(list, f)
+}
+
+func (m *Message) appendFileCustom(list []*fileCustom, name string, objfile []byte, settings []FileSetting) []*fileCustom {
+	buf := bytes.NewBuffer(objfile)
+	f := &fileCustom{
+		Name:        filepath.Base(name),
+		ObjectBytes: objfile,
+		Header:      make(map[string][]string),
+		CopyFunc: func(w io.Writer) error {
+			if _, err := io.Copy(w, buf); err != nil {
+				return err
+			}
+			return nil
+		},
+	}
+
+	for _, s := range settings {
+		s(f)
+	}
+
+	if list == nil {
+		return []*fileCustom{f}
 	}
 
 	return append(list, f)
@@ -314,6 +339,10 @@ func (m *Message) appendFile(list []*file, name string, settings []FileSetting) 
 // Attach attaches the files to the email.
 func (m *Message) Attach(filename string, settings ...FileSetting) {
 	m.attachments = m.appendFile(m.attachments, filename, settings)
+}
+
+func (m *Message) AttachCustom(filename string, objfile []byte, settings ...FileSetting) {
+	m.attachments = m.appendFileCustom(m.attachments, filename, objfile, settings)
 }
 
 // Embed embeds the images to the email.
